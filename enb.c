@@ -60,7 +60,6 @@ void *wait_for_msg(void *vargp)
 		}
 		else
 		{
-			printf("Received %d bytes from MME\n", in);
 			handle_received_message(buffer);
 		}
 	}
@@ -82,7 +81,7 @@ void send_sctp_message(long id)
 		perror("sctp_sendmsg()");
 	}
 	else
-		printf("Successfully sent %d bytes data to server\n", ret);
+		debug_print("Successfully sent %d bytes data to MME\n", ret);
 }
 void cleanup()
 {
@@ -104,7 +103,7 @@ void create_connection()
 	// set the association options
 	initmsg.sinit_num_ostreams = 1;
 	setsockopt(socket_fd, IPPROTO_SCTP, SCTP_INITMSG, &initmsg, sizeof(initmsg));
-	printf("setsockopt succeeded...\n");
+	debug_print("setsockopt succeeded...\n");
 
 	ret = connect(socket_fd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
@@ -131,7 +130,7 @@ void process_message(struct message *msg, long id)
 		{
 		case AUTH_REQ:
 		{
-			printf("Auth Req received\n");
+			debug_print("Auth Req received\n");
 			struct auth_req *auth_req = (struct auth_req *)&msg->message_union;
 			int id = auth_req->enb_ue_s1ap_id;
 			ue_info_arr[id].message.message_union.auth_res.mme_ue_s1ap_id =
@@ -145,11 +144,22 @@ void process_message(struct message *msg, long id)
 
 		case SEC_MODE_COMMAND:
 		{
+			debug_print("Security Mode Command received\n");
 			struct sec_mode_command *sec_mode_command =
 				(struct sec_mode_command *)&msg->message_union;
-			int id = sec_mode_command->mme_ue_s1ap_id;
+			int id = sec_mode_command->enb_ue_s1ap_id;
+			ue_info_arr[id].message.message_union.sec_mode_complete.mme_ue_s1ap_id = sec_mode_command->mme_ue_s1ap_id;
 			build_sec_mode_complete(id);
+			send_sctp_message(id);
 		}
+		break;
+
+		case ATTACH_ACCEPT:
+			printf("Attach Accept received\n");
+		break;
+		
+		default:
+			printf("Unknown message received!\n");
 		break;
 		}
 	}
@@ -163,6 +173,7 @@ void build_attach(long id)
 	ue_info_arr[id].message.message_union.attach_req.imsi[0] = 1;
 	ue_info_arr[id].message.message_union.attach_req.tai = 1;
 	ue_info_arr[id].message.message_union.attach_req.net_cap = 1;
+	ue_info_arr[id].message.message_union.attach_req.plmn_id = 1;
 	ue_info_arr[id].datalen = sizeof(struct message);
 }
 
@@ -175,4 +186,9 @@ void build_auth_response(long id)
 
 void build_sec_mode_complete(long id)
 {
+	ue_info_arr[id].message.type = SEC_MODE_COMPLETE;
+	ue_info_arr[id].message.message_union.sec_mode_complete.enb_ue_s1ap_id = id;
+	ue_info_arr[id].message.message_union.sec_mode_complete.tai = ue_info_arr[id].tai;
+	ue_info_arr[id].message.message_union.sec_mode_complete.plmn_id = ue_info_arr[id].plmn_id;
+	ue_info_arr[id].datalen = sizeof(struct message);
 }
