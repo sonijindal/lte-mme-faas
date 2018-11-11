@@ -1,16 +1,16 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <netinet/in.h>
 #include <netinet/sctp.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
-#include "ue.h"
 #include "common.h"
 #include "enb.h"
+#include "ue.h"
 
 int main(int argc, char *argv[])
 {
@@ -41,6 +41,7 @@ int main(int argc, char *argv[])
 
 	return 0;
 }
+
 void *wait_for_msg(void *vargp)
 {
 	int in, flags;
@@ -48,8 +49,8 @@ void *wait_for_msg(void *vargp)
 	while (1)
 	{
 		uint8_t buffer[MAX_BUFFER + 1];
-		in = sctp_recvmsg(socket_fd, buffer, sizeof(buffer), (struct sockaddr *)NULL,
-						  0, &sndrcvinfo, &flags);
+		in = sctp_recvmsg(socket_fd, buffer, sizeof(buffer),
+						  (struct sockaddr *)NULL, 0, &sndrcvinfo, &flags);
 		if (in <= 0)
 		{
 			printf("Error in sctp_recvmsg\n");
@@ -73,8 +74,8 @@ void handle_received_message(uint8_t *buffer)
 void send_sctp_message(long id)
 {
 	int ret;
-	ret = sctp_sendmsg(socket_fd, (void *)&ue_info_arr[id].message, (size_t)ue_info_arr[id].datalen,
-					   NULL, 0, 0, 0, 0, 0, 0);
+	ret = sctp_sendmsg(socket_fd, (void *)&ue_info_arr[id].message,
+					   (size_t)ue_info_arr[id].datalen, NULL, 0, 0, 0, 0, 0, 0);
 	if (ret == -1)
 	{
 		printf("Error in sctp_sendmsg\n");
@@ -93,17 +94,18 @@ void create_connection()
 	int ret = -1;
 	struct sctp_initmsg initmsg = {0};
 	socket_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP);
-	//ue_info_arr[id].socket = socket_fd;
+	// ue_info_arr[id].socket = socket_fd;
 	if (socket_fd == -1)
 	{
 		printf("Socket creation failed\n");
 		perror("socket()");
 		exit(1);
 	}
-	//set the association options
+	// set the association options
 	initmsg.sinit_num_ostreams = 1;
 	setsockopt(socket_fd, IPPROTO_SCTP, SCTP_INITMSG, &initmsg, sizeof(initmsg));
 	printf("setsockopt succeeded...\n");
+
 	ret = connect(socket_fd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
 	if (ret == -1)
@@ -132,8 +134,10 @@ void process_message(struct message *msg, long id)
 			printf("Auth Req received\n");
 			struct auth_req *auth_req = (struct auth_req *)&msg->message_union;
 			int id = auth_req->enb_ue_s1ap_id;
-			ue_info_arr[id].message.message_union.auth_res.mme_ue_s1ap_id = auth_req->mme_ue_s1ap_id;
-			ue_info_arr[id].message.message_union.auth_res.auth_challenge_answer = auth_req->auth_challenge;
+			ue_info_arr[id].message.message_union.auth_res.mme_ue_s1ap_id =
+				auth_req->mme_ue_s1ap_id;
+			ue_info_arr[id].message.message_union.auth_res.auth_challenge_answer =
+				auth_req->auth_challenge;
 			build_auth_response(id);
 			send_sctp_message(id);
 		}
@@ -141,7 +145,8 @@ void process_message(struct message *msg, long id)
 
 		case SEC_MODE_COMMAND:
 		{
-			struct sec_mode_command *sec_mode_command = (struct sec_mode_command *)&msg->message_union;
+			struct sec_mode_command *sec_mode_command =
+				(struct sec_mode_command *)&msg->message_union;
 			int id = sec_mode_command->mme_ue_s1ap_id;
 			build_sec_mode_complete(id);
 		}
@@ -153,7 +158,8 @@ void process_message(struct message *msg, long id)
 void build_attach(long id)
 {
 	ue_info_arr[id].message.type = ATTACH_REQ;
-	ue_info_arr[id].message.message_union.attach_req.enb_ue_s1ap_id = id; //enb_ue_s1ap_id uniquely identifies the UE at enb.
+	ue_info_arr[id].message.message_union.attach_req.enb_ue_s1ap_id =
+		id; // enb_ue_s1ap_id uniquely identifies the UE at enb.
 	ue_info_arr[id].message.message_union.attach_req.imsi[0] = 1;
 	ue_info_arr[id].message.message_union.attach_req.tai = 1;
 	ue_info_arr[id].message.message_union.attach_req.net_cap = 1;
@@ -166,6 +172,7 @@ void build_auth_response(long id)
 	ue_info_arr[id].message.message_union.auth_res.enb_ue_s1ap_id = id;
 	ue_info_arr[id].datalen = sizeof(struct message);
 }
+
 void build_sec_mode_complete(long id)
 {
 }
