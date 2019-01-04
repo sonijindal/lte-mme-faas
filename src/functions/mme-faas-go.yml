@@ -1,0 +1,10 @@
+provider:
+  name: faas
+  gateway: http://127.0.0.1:31112
+functions:
+  mme-faas-go:
+    lang: go
+    handler: ./mme-faas-go
+    image: sonika/mme-faas-go:latest
+    environment:
+      write_debug: true
