@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
+	"strings"
 	//	"handler/function/common"
 	"math/rand"
 	"time"
@@ -100,6 +102,15 @@ func process_event(req []byte) []byte {
 		id := msg.Sec_mode_complete.Mme_ue_s1ap_id
 		ue_info := get(id, session)
 		attach_accept := build_attach_accept(id, ue_info)
+		// Start timer for 6s, T3450
+		req_url := "http://128.110.154.116:31112/async-function/lte-timer"
+		client := &http.Client{}
+		form := strings.NewReader("6")
+		req, _ := http.NewRequest("POST", req_url, form)
+
+		req.Header.Add("X-Callback-Url", "http://128.110.154.116:31112/async-function/mme-faas-go")
+		resp, _ := client.Do(req)
+		defer resp.Body.Close()
 		return attach_accept
 
 	default:
