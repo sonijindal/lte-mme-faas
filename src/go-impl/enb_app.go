@@ -19,6 +19,8 @@ import (
 )
 
 var mme_ip string
+var req_url string
+var async int
 
 func main() {
 	args := os.Args[1:]
@@ -26,13 +28,88 @@ func main() {
 	fmt.Println(args[1])
 	mme_ip = args[0]
 	num_ue, _ := strconv.Atoi(args[1])
+	async = 0
+	if len(args) == 3 {
+		async, _ = strconv.Atoi(args[2])
+	}
 	Ue_info_arr = make([]Ue_info, num_ue)
-	go send_request(num_ue)
-	//http.HandleFunc("/", process_msg)
-	//http.ListenAndServe(":8001", nil)
-	fmt.Scanln()
+	if async == 1 {
+		req_url = "http://128.110.154.116:31112/async-function/mme-faas-go"
+		go send_request(num_ue)
+		http.HandleFunc("/", process_async_msg)
+		http.ListenAndServe("128.110.154.116:8001", nil)
+	} else {
+		req_url = "http://128.110.154.116:31112/function/mme-faas-go"
+		go send_request(num_ue)
+		fmt.Scanln()
+	}
 }
+func process_async_msg(w http.ResponseWriter, req *http.Request) {
 
+	b, _ := ioutil.ReadAll(req.Body)
+	body := string(b[:])
+	//fmt.Printf("Message from mme %s, len:%d\n", body, len(body))
+	body = body[1 : len(body)-2]
+	numbers := strings.Fields(body)
+	input_len := len(numbers)
+	//fmt.Println(numbers, input_len)
+	body_bytes := make([]byte, input_len)
+	for i := 0; i < input_len; i++ {
+		in, _ := strconv.Atoi(numbers[i])
+		body_bytes[i] = byte(in)
+		//fmt.Println(numbers[i], body_bytes[i])
+	}
+
+	/*for i := 0; i < len(body); i++ {
+		fmt.Printf("%c ", body[i])
+	}
+	fmt.Printf("\n")*/
+	var msg Message_union_t
+	err := json.Unmarshal(body_bytes, &msg)
+	if err != nil {
+		panic(err)
+	}
+
+	go func(msg Message_union_t) {
+		switch msg.Msg_type {
+		case AUTH_REQ:
+
+			auth_req := msg.Auth_req
+			id := auth_req.Enb_ue_s1ap_id
+			fmt.Printf("AUTH_REQ received, %d\n", id)
+			Ue_info_arr[id].Message.Msg_type = AUTH_RES
+			Ue_info_arr[id].Message.Auth_res.Mme_ue_s1ap_id =
+				auth_req.Mme_ue_s1ap_id
+			Ue_info_arr[id].Message.Auth_res.Enb_ue_s1ap_id = id
+			Ue_info_arr[id].Message.Auth_res.Auth_challenge_answer =
+				auth_req.Auth_challenge
+
+			send_response(Ue_info_arr[id].Message)
+
+		case SEC_MODE_COMMAND:
+
+			sec_mode_command := msg.Sec_mode_command
+			id := sec_mode_command.Enb_ue_s1ap_id
+			fmt.Printf("SEC_MODE_COMMAND received, %d\n", id)
+			Ue_info_arr[id].Message.Msg_type = SEC_MODE_COMPLETE
+			Ue_info_arr[id].Message.Sec_mode_complete.Mme_ue_s1ap_id =
+				sec_mode_command.Mme_ue_s1ap_id
+			Ue_info_arr[id].Message.Sec_mode_complete.Enb_ue_s1ap_id = id
+			Ue_info_arr[id].Message.Sec_mode_complete.Tai = Ue_info_arr[id].Tai
+			Ue_info_arr[id].Message.Sec_mode_complete.Plmn_id = Ue_info_arr[id].Plmn_id
+
+			send_response(Ue_info_arr[id].Message)
+
+		case ATTACH_ACCEPT:
+			fmt.Printf("ATTACH_ACCEPT received, %d\n", msg.Attach_accept.Enb_ue_s1ap_id)
+
+		default:
+			fmt.Printf("Unhandled message(%s) received\n", msg.Msg_type)
+			break
+
+		}
+	}(msg)
+}
 func process_msg(req *http.Response) {
 
 	b, _ := ioutil.ReadAll(req.Body)
@@ -123,13 +200,23 @@ func send_request(num_ue int) {
 
 func send_response(msg Message_union_t) {
 	//req_url := "http://" + mme_ip + ":8002"
-	req_url := "http://128.110.154.116:31112/function/mme-faas-go"
+
 	form := new(bytes.Buffer)
 	json.NewEncoder(form).Encode(msg)
 
 	go func(req_url string, form io.Reader) {
-		resp, _ := http.Post(req_url, "application/json", form)
-		process_msg(resp)
+		client := &http.Client{}
+		req, _ := http.NewRequest("POST", req_url, form)
+		if async == 1 {
+			req.Header.Add("X-Callback-Url", "http://128.110.154.116:8001")
+			resp, _ := client.Do(req)
+			defer resp.Body.Close()
+		} else {
+			resp, _ := client.Do(req)
+			defer resp.Body.Close()
+			//resp, _ := http.Post(req_url, "application/json", form)
+			process_msg(resp)
+		}
 	}(req_url, form)
 
 }
