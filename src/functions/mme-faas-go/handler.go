@@ -2,8 +2,10 @@
 package function
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	//	"handler/function/common"
 	"math/rand"
 	"time"
@@ -48,7 +50,7 @@ func Handle(req []byte) []byte {
 	// if err != nil {
 	// 	panic(err)
 	// }
-	//fmt.Println(msg)
+	//fmt.Println(res)
 	//Enabling this Close, disconnects the connection randomly, so just comment it for now.
 	//session.Close()
 	return res
@@ -63,7 +65,7 @@ func process_event(req []byte) []byte {
 	json.Unmarshal(req, &msg)
 	switch msg.Msg_type {
 	case ATTACH_REQ:
-		//ret = hss-sgw-stub (AUTH_INFO_REQ) //ignore ret
+		hss_sgw_stub(AUTH_INFO_REQ) //ignore ret
 
 		id := generate_mme_id()
 		ue_info := Ue_info{Ue_id: msg.Attach_req.Imsi, Tai: msg.Attach_req.Tai, Enb_ue_s1ap_id: msg.Attach_req.Enb_ue_s1ap_id,
@@ -92,8 +94,8 @@ func process_event(req []byte) []byte {
 		return sec_mode_command
 
 	case SEC_MODE_COMPLETE:
-		//ret = hss_sgw_stub(update_location_req) //ignore ret
-		//ret = hss_sgw_stub(create_session_req)  //ignore ret
+		hss_sgw_stub(UPDATE_LOC_REQ)     //ignore ret
+		hss_sgw_stub(CREATE_SESSION_REQ) //ignore ret
 		//fmt.Printf("SEC_MODE_COMPLETE received, %d\n", msg.Sec_mode_complete.Enb_ue_s1ap_id)
 		id := msg.Sec_mode_complete.Mme_ue_s1ap_id
 		ue_info := get(id, session)
@@ -101,14 +103,41 @@ func process_event(req []byte) []byte {
 		return attach_accept
 
 	default:
-		//ret = hss_sgw_stub(modify_bearer_req) //ignore ret
+		hss_sgw_stub(MODIFY_BEARER_REQ) //ignore ret
 		fmt.Printf("Unhandled message(%d) received\n", msg.Msg_type)
 		msg.Msg_type = INVALID
 		msg_str, _ := json.Marshal(&msg)
 		return []byte(msg_str)
 	}
 }
+func hss_sgw_stub(msg_type S1ap_message_t) int {
+	//If remote hss_sgw_stub, create tcp connection. The response can
+	//sync or async
+	conn, _ := net.Dial("tcp", "128.110.154.116:8081")
+	text := "STB_MSG"
+	fmt.Fprintf(conn, text+"\n")
+	// Remove this for async response from stub
+	_, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		fmt.Println("Error in reading response from hss_sgw_stub")
+		return 1
+	}
+	return 0
+	//TODO: Add appropriate sleep for each message type
+	// switch {
+	// case auth_info_req:
+	// 	return auth_info_answer
 
+	// case update_location_req:
+	// 	return update_location_answer
+
+	// case create_session_req:
+	// 	return create_session_res
+
+	// case modify_bearer_req:
+	// 	return modify_bearer_res
+	// }
+}
 func build_auth_request(id uint64, ue_info Ue_info) []byte {
 	ue_info.Message.Msg_type = AUTH_REQ
 	ue_info.Message.Auth_req.Mme_ue_s1ap_id = ue_info.Mme_ue_s1ap_id
