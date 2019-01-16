@@ -1,0 +1,11 @@
+provider:
+  name: faas
+  gateway: http://127.0.0.1:31112
+functions:
+  cass-func-go:
+    lang: go
+    handler: ./cass-func-go
+    image: sonika/cass-func-go:latest
+    environment:
+      write_debug: true
+
