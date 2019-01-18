@@ -1,0 +1,109 @@
+Fulder structure needs to be formatted!
+lte-enb-mme/src:
+dynamo_app_aws: AWS Lambda function to perform DynamoDB queries
+functions: Contains functions for OpenFaas
+	cass-func-go: Function to perform Cassandra queries. To test gocql package
+	lte-timer: Function to implement timer, taking input as number of seconds
+	mme-faas-go: Main function to support Attach procedure
+go-impl: Some test apps and supporting code. First 3 are part of an independent code
+	which was written to simulate the serverless environment for building the enb,
+	mme and stub apps.
+	common: Contains ue.go which defines the UE context and message structure used
+		by all the apps
+	enb.go: eNB simulator implementing the state machine.
+	function: Contains the mme app implementation which was built and tested in
+		  simulated environment and then ported to OpenFaas.
+		data_access.go: Cassandra insert, update and read implementation
+		hss-sgw-stub.go: Stub for hss and spgq. Not used
+		mme.go: MME function which receives requests and generates responses
+			and uses database to store the state.
+	http-stub.go: This is the middle layer simulating a serverless platform api gateway.
+		      It listens for http connection and calls the mme function. The
+		      eNB app sends http request to this stub. This helps in building an
+		      independent mme and enb apps.
+ 
+	enb_app.go: App to simulate eNB functionality. It supports sync and async mode
+		    of calls to the MME FaaS functions. It is to be used with OpenFaaS
+		    functions.
+	enb_app_aws.go: eNB app to test AWS Lambda based MME function.
+	main: Test golang AWS Lambda app
+	spgw-hss-stub.go: Listens on tcp port for requests from MME destined to SPGW or
+			  HSS. It replies to MME with the appropriate response for the
+			  message. Appropriate delay can be added for each method to
+			  approximate the real interactions with SPGW and HSS.
+	template: Auto downloaded template by OpenFaaS cli while creating functions.
+	test: Test apps and some independent trials
+		cass-func-test.go: Test app for testing cassandra function (cass-func-go)
+		cass-test.go: Test app to directly test cassandra cluster.
+		db_access.go: Some more test with cassandra db
+		dynamo-test.go: Test app to query dynamoDB
+		rand_t.go: Random number generation
+		results: Folder to store log files. Naming convention: <feature><param>-<time>.
+			 feature: cass, app, dynamo
+			 param: cass-0(insert), 1(update), 2(read) and app-0(sync), 1(async)
+		str_to_byte_array.go
+mme_faas_aws: Function ported on AWS Lambda
+mme_faas_aws_dynamo: AWS Lambda function with DynamoDB support
+
+AWS Lambda build and deploy:
+cd lte-enb-mme/src
+env GOOS=linux GOARCH=amd64 go build -o mme_faas_aws_dynamo/main mme_faas_aws_dynamo
+cd mme_faas_aws_dynamo
+zip -f main.zip main
+
+Sign in to AWS lambda console from browser
+Create function
+Select Go 1.x as runtime
+Created an IAM role with AmazonDynamoDBFullAccess and AWSLambdaBasicExecutionRole policies
+Attach it Execution role of the function
+Upload the main.zip
+Add API gateway 
+Test using enb_app_aws.go
+
+OpenFaas function build and deploy:
+cd lte-enb-mme/src/functions
+faas-cli build -f ./mme-faas-go.yml
+faas-cli push -f ./mme-faas-go.yml
+faas-cli deploy -f ./mme-faas-go.yml
+
+OpenFaas platform deployment:
+sudo apt-get update   && sudo apt-get install -y apt-transport-https   && curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+echo "deb http://apt.kubernetes.io/ kubernetes-xenial main"   | sudo tee -a /etc/apt/sources.list.d/kubernetes.list   && sudo apt-get update
+sudo apt-get update   && sudo apt-get install -y   kubelet   kubeadm   kubernetes-cni
+sudo kubeadm reset
+sudo swapoff -a
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+rm -rf $HOME/.kube && mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/v0.10.0/Documentation/kube-flannel.yml
+kubectl get nodes
+kubectl get all --namespace=kube-system
+kubectl taint nodes $(hostname) node-role.kubernetes.io/master:NoSchedule-
+git clone https://github.com/openfaas/faas-netes
+kubectl apply -f https://raw.githubusercontent.com/openfaas/faas-netes/master/namespaces.yml
+kubectl apply -f ./yaml
+
+AWS Configuration:
+awscli is used if cli is used for different configuration. But I used aws console.
+sudo apt install awscli
+aws --version
+ > aws-cli/1.11.139 Python/3.6.3 Linux/4.13.0-37-generic botocore/1.6.6
+go get github.com/aws/aws-lambda-go/lambda
+
+DynamoDB configuration:
+Create table from console.
+Name primary key as 'key' of type number
+
+Testing: All the logs will be stored in lte-enb-mme/src/go-impl/results
+
+AWS:
+cd lte-enb-mme/src/go-imp
+go run enb_app_aws.go <num ue>
+
+OpenFaas:
+go run spgw-hss-stub.go 8081
+go run enb_app.go <mme_ip-OpenFaaS gateway ip> <num ue> <0/1>
+
+DynamoDB:
+go run dynamo-test.go 2 100
