@@ -22,6 +22,7 @@ func main() {
 	lambda.Start(Handle)
 }
 
+var cluster *gocql.ClusterConfig
 var session *gocql.Session
 
 func Handle(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -34,16 +35,20 @@ func Handle(request events.APIGatewayProxyRequest) (events.APIGatewayProxyRespon
 
 // Handle a serverless request
 func HandleReq(req []byte) []byte {
-
-	cluster := gocql.NewCluster("128.110.154.116")
-	cluster.Keyspace = "mme_faas"
-	var err error
-	session, err = cluster.CreateSession()
-	if err != nil {
-		fmt.Println("Error in creating session", err)
-		return []byte{0}
+	if session == nil || session.Closed() {
+		if cluster == nil {
+			cluster = gocql.NewCluster("128.110.154.116")
+			cluster.Keyspace = "mme_faas"
+		}
+		var err error
+		if session, err = cluster.CreateSession(); err != nil {
+			fmt.Println("Error in creating session", err)
+			return []byte{0}
+		}
 	}
-	res := process_event(req)
+
+	res := process_event(req, session)
+	//session.Close()
 	return res
 }
 func generate_mme_id() uint64 {
@@ -51,7 +56,7 @@ func generate_mme_id() uint64 {
 	r1 := rand.New(s1)
 	return (uint64(r1.Uint32())<<32 + uint64(r1.Uint32()))
 }
-func process_event(req []byte) []byte {
+func process_event(req []byte, session *gocql.Session) []byte {
 	var msg Message_union_t
 	json.Unmarshal(req, &msg)
 	switch msg.Msg_type {
@@ -73,15 +78,15 @@ func process_event(req []byte) []byte {
 			panic(err)
 		}
 		//fmt.Printf("Sending response of size:%d\n", len(auth_req))
-		fmt.Printf("ATTACH_REQ received, %d, mme id:%d\n", msg.Attach_req.Enb_ue_s1ap_id, id)
+		//fmt.Printf("ATTACH_REQ received, %d, mme id:%d\n", msg.Attach_req.Enb_ue_s1ap_id, id)
 		return auth_req
 
 	case AUTH_RES:
 		//generate nas keys
-		fmt.Printf("AUTH_RES received, %d\n", msg.Auth_res.Enb_ue_s1ap_id)
+		//fmt.Printf("AUTH_RES received, %d\n", msg.Auth_res.Enb_ue_s1ap_id)
 		id := msg.Auth_res.Mme_ue_s1ap_id
 		ue_info := get(id, session)
-		sec_mode_command := build_sec_mode_command(id, ue_info)
+		sec_mode_command := build_sec_mode_command(id, ue_info, session)
 		return sec_mode_command
 
 	case SEC_MODE_COMPLETE:
@@ -90,7 +95,7 @@ func process_event(req []byte) []byte {
 		//fmt.Printf("SEC_MODE_COMPLETE received, %d\n", msg.Sec_mode_complete.Enb_ue_s1ap_id)
 		id := msg.Sec_mode_complete.Mme_ue_s1ap_id
 		ue_info := get(id, session)
-		attach_accept := build_attach_accept(id, ue_info)
+		attach_accept := build_attach_accept(id, ue_info, session)
 		// Start timer for 6s, T3450, comment timer for aws
 		//req_url := "http://128.110.154.116:31112/async-function/lte-timer"
 		//client := &http.Client{}
@@ -146,7 +151,7 @@ func build_auth_request(id uint64, ue_info Ue_info) []byte {
 	return msg_str
 }
 
-func build_sec_mode_command(id uint64, ue_info Ue_info) []byte {
+func build_sec_mode_command(id uint64, ue_info Ue_info, session *gocql.Session) []byte {
 	ue_info.Message.Msg_type = SEC_MODE_COMMAND
 	ue_info.Message.Sec_mode_command.Mme_ue_s1ap_id = ue_info.Mme_ue_s1ap_id
 	ue_info.Message.Sec_mode_command.Enb_ue_s1ap_id = ue_info.Enb_ue_s1ap_id
@@ -156,7 +161,7 @@ func build_sec_mode_command(id uint64, ue_info Ue_info) []byte {
 	return msg_str
 }
 
-func build_attach_accept(id uint64, ue_info Ue_info) []byte {
+func build_attach_accept(id uint64, ue_info Ue_info, session *gocql.Session) []byte {
 	ue_info.Message.Msg_type = ATTACH_ACCEPT
 	ue_info.Message.Attach_accept.Mme_ue_s1ap_id = ue_info.Mme_ue_s1ap_id
 	ue_info.Message.Attach_accept.Enb_ue_s1ap_id = ue_info.Enb_ue_s1ap_id
