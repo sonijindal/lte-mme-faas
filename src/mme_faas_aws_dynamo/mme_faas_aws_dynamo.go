@@ -12,7 +12,12 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
+
+var db *dynamodb.DynamoDB
 
 func main() {
 	lambda.Start(Handle)
@@ -37,6 +42,9 @@ func generate_mme_id() uint64 {
 	return (uint64(r1.Uint32())<<32 + uint64(r1.Uint32()))
 }
 func process_event(req []byte) []byte {
+	if db == nil {
+		db = dynamodb.New(session.New(), aws.NewConfig().WithRegion("us-east-2"))
+	}
 	var msg Message_union_t
 	json.Unmarshal(req, &msg)
 	switch msg.Msg_type {
@@ -47,7 +55,7 @@ func process_event(req []byte) []byte {
 		ue_info := Ue_info{Ue_id: msg.Attach_req.Imsi, Tai: msg.Attach_req.Tai, Enb_ue_s1ap_id: msg.Attach_req.Enb_ue_s1ap_id,
 			Ue_state: IDLE, Plmn_id: msg.Attach_req.Plmn_id, Mme_ue_s1ap_id: id}
 		auth_req := build_auth_request(id, ue_info)
-		for insert(id, ue_info) != true {
+		for insert(id, ue_info, db) != true {
 			id = generate_mme_id()
 			ue_info.Mme_ue_s1ap_id = id
 			ue_info.Message.Auth_req.Mme_ue_s1ap_id = id
@@ -66,13 +74,13 @@ func process_event(req []byte) []byte {
 
 		id := msg.Auth_res.Mme_ue_s1ap_id
 		//fmt.Printf("AUTH_RES received, %d, mme_ue_id:%d\n", msg.Auth_res.Enb_ue_s1ap_id, id)
-		ue_info, err := get(id)
+		ue_info, err := get(id, db)
 		if err != nil {
 			fmt.Println("Couldnt retrieve ue id:", id, err.Error())
 			break
 		}
 
-		sec_mode_command := build_sec_mode_command(id, ue_info)
+		sec_mode_command := build_sec_mode_command(id, ue_info, db)
 		return sec_mode_command
 
 	case SEC_MODE_COMPLETE:
@@ -81,12 +89,12 @@ func process_event(req []byte) []byte {
 
 		id := msg.Sec_mode_complete.Mme_ue_s1ap_id
 		//fmt.Printf("SEC_MODE_COMPLETE received, %d, mme_ue_id:%d\n", msg.Sec_mode_complete.Enb_ue_s1ap_id, id)
-		ue_info, err := get(id)
+		ue_info, err := get(id, db)
 		if err != nil {
 			fmt.Println("Couldnt retrieve ue id:", id, err.Error())
 			break
 		}
-		attach_accept := build_attach_accept(id, ue_info)
+		attach_accept := build_attach_accept(id, ue_info, db)
 
 		return attach_accept
 
@@ -94,12 +102,19 @@ func process_event(req []byte) []byte {
 		//hss_sgw_stub(MODIFY_BEARER_REQ) //ignore ret
 		fmt.Printf("MME Unhandled message(%d) received\n", msg.Msg_type)
 		msg.Msg_type = INVALID
-		msg_str, _ := json.Marshal(&msg)
+		msg_str, err := json.Marshal(&msg)
+		if err != nil {
+			fmt.Println("Couldnt Marshal INVALID message")
+			break
+		}
 		return []byte(msg_str)
 	}
 
 	msg.Msg_type = ERROR
-	msg_str, _ := json.Marshal(&msg)
+	msg_str, err := json.Marshal(&msg)
+	if err != nil {
+		fmt.Println("Couldnt Marshal ERROR message")
+	}
 	return []byte(msg_str)
 }
 func hss_sgw_stub(msg_type S1ap_message_t) int {
@@ -135,28 +150,39 @@ func build_auth_request(id uint64, ue_info Ue_info) []byte {
 	ue_info.Message.Auth_req.Mme_ue_s1ap_id = ue_info.Mme_ue_s1ap_id
 	ue_info.Message.Auth_req.Enb_ue_s1ap_id = ue_info.Enb_ue_s1ap_id
 	ue_info.Message.Auth_req.Auth_challenge = 0xaa
-	msg_str, _ := json.Marshal(&ue_info.Message)
+	msg_str, err := json.Marshal(&ue_info.Message)
+	if err != nil {
+		fmt.Println("Couldnt Marshal AUTH_REQ message")
+	}
 	return msg_str
 }
 
-func build_sec_mode_command(id uint64, ue_info Ue_info) []byte {
+func build_sec_mode_command(id uint64, ue_info Ue_info, db *dynamodb.DynamoDB) []byte {
 
 	ue_info.Message.Msg_type = SEC_MODE_COMMAND
 	ue_info.Message.Sec_mode_command.Mme_ue_s1ap_id = ue_info.Mme_ue_s1ap_id
 	ue_info.Message.Sec_mode_command.Enb_ue_s1ap_id = ue_info.Enb_ue_s1ap_id
 	ue_info.Message.Sec_mode_command.Sec_algo = 0xaa
-	msg_str, _ := json.Marshal(&ue_info.Message)
-	update(id, ue_info)
+	msg_str, err := json.Marshal(&ue_info.Message)
+	if err != nil {
+		fmt.Println("Couldnt Marshal SEC_MODE_COMMAND message")
+	} else {
+		update(id, ue_info, db)
+	}
 	return msg_str
 }
 
-func build_attach_accept(id uint64, ue_info Ue_info) []byte {
+func build_attach_accept(id uint64, ue_info Ue_info, db *dynamodb.DynamoDB) []byte {
 	ue_info.Message.Msg_type = ATTACH_ACCEPT
 	ue_info.Message.Attach_accept.Mme_ue_s1ap_id = ue_info.Mme_ue_s1ap_id
 	ue_info.Message.Attach_accept.Enb_ue_s1ap_id = ue_info.Enb_ue_s1ap_id
 	ue_info.Message.Attach_accept.Ambr = 100
 	ue_info.Message.Attach_accept.Sec_cap = 100
-	msg_str, _ := json.Marshal(&ue_info.Message)
-	update(id, ue_info)
+	msg_str, err := json.Marshal(&ue_info.Message)
+	if err != nil {
+		fmt.Println("Couldnt Marshal ATTACH_ACCEPT message")
+	} else {
+		update(id, ue_info, db)
+	}
 	return msg_str
 }
