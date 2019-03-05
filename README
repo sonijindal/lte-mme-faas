@@ -1,4 +1,4 @@
-Fulder structure needs to be formatted!
+Folder structure needs to be formatted!
 lte-enb-mme/src:
 dynamo_app_aws: AWS Lambda function to perform DynamoDB queries
 functions: Contains functions for OpenFaas
